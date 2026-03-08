@@ -21,6 +21,9 @@ jobs:
       - name: application.yml 파일 만들기
         run: echo "${{ secrets.APPLICATION_PROPERTIES }}" > ./src/main/resources/application.yml
 
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
       - name: 테스트 및 빌드하기
         run: ./gradlew clean build
 
@@ -47,9 +50,9 @@ jobs:
       - name: SSH로 EC2에 접속하기
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
-          key: ${{ secrets.EC2_PRIVATE_KEY }}
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.KEY }}
           script_stop: true
           script: |
             docker stop instagram-server || true
