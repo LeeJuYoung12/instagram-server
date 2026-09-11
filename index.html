@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>걷는 동물 테스트</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+  #info { position: absolute; top: 10px; left: 10px; color: #fff; z-index: 10; font-size: 14px; background: rgba(0,0,0,0.5); padding: 8px 12px; border-radius: 8px; }
+  #controls { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 10; display: flex; gap: 10px; }
+  button { padding: 12px 20px; font-size: 16px; border-radius: 8px; border: none; background: #4a7; color: white; cursor: pointer; }
+  button:active { background: #285; }
+</style>
+</head>
+<body>
+<div id="info">방향키 또는 버튼으로 이동 / 마우스 드래그로 시점 회전 / 스크롤로 줌</div>
+<div id="controls">
+  <button id="btnWalk">걷기 토글</button>
+  <button id="btnSize">크기: 중형</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/controls/OrbitControls.js"></script>
+<script>
+// ---- 기본 씬 ----
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x88bbdd);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 100);
+camera.position.set(3, 2.5, 4);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.3, 0);
+
+// 조명
+const light = new THREE.DirectionalLight(0xffffff, 1);
+light.position.set(3, 5, 2);
+light.castShadow = true;
+scene.add(light);
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+// 방바닥 (방 크기 체감용 - 대략 3m x 3m 원룸 느낌)
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(6, 6),
+  new THREE.MeshStandardMaterial({ color: 0xdccBa4 })
+);
+floor.rotation.x = -Math.PI/2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+const grid = new THREE.GridHelper(6, 12, 0x888888, 0xaaaaaa);
+scene.add(grid);
+
+// ---- 절차적 저폴리 강아지 생성 ----
+function buildDog(scale) {
+  const dog = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0xa0703a });
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.4, 0.35), mat);
+  body.position.y = 0.4;
+  body.castShadow = true;
+  dog.add(body);
+
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), mat);
+  head.position.set(0.55, 0.55, 0);
+  head.castShadow = true;
+  dog.add(head);
+
+  const snout = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.15, 0.15), mat);
+  snout.position.set(0.75, 0.5, 0);
+  dog.add(snout);
+
+  const earGeo = new THREE.BoxGeometry(0.08, 0.15, 0.05);
+  [-1, 1].forEach(s => {
+    const ear = new THREE.Mesh(earGeo, mat);
+    ear.position.set(0.55, 0.7, 0.13 * s);
+    dog.add(ear);
+  });
+
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.08, 0.08), mat);
+  tail.position.set(-0.55, 0.55, 0);
+  tail.rotation.z = 0.6;
+  tail.name = "tail";
+  dog.add(tail);
+
+  // 다리 4개 (관절처럼 회전시킬 그룹)
+  const legs = [];
+  const legPositions = [
+    [0.32, 0.15], [0.32, -0.15], [-0.32, 0.15], [-0.32, -0.15]
+  ];
+  legPositions.forEach((pos, i) => {
+    const legGroup = new THREE.Group();
+    legGroup.position.set(pos[0], 0.4, pos[1]);
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.4, 0.1), mat);
+    leg.position.y = -0.2;
+    leg.castShadow = true;
+    legGroup.add(leg);
+    dog.add(legGroup);
+    legs.push(legGroup);
+  });
+
+  dog.userData.legs = legs;
+  dog.userData.tail = tail;
+  dog.scale.set(scale, scale, scale);
+  return dog;
+}
+
+let currentScale = 1.0;
+let dog = buildDog(currentScale);
+scene.add(dog);
+
+// ---- 걷기 상태 ----
+let walking = true;
+let walkTime = 0;
+let heading = 0; // 진행 방향
+let keys = {};
+
+document.addEventListener('keydown', e => keys[e.key] = true);
+document.addEventListener('keyup', e => keys[e.key] = false);
+
+document.getElementById('btnWalk').onclick = () => {
+  walking = !walking;
+};
+
+const sizes = [
+  { label: "소형 (5kg급)", scale: 0.6 },
+  { label: "중형 (15kg급)", scale: 1.0 },
+  { label: "대형 (30kg급)", scale: 1.5 },
+];
+let sizeIdx = 1;
+document.getElementById('btnSize').onclick = () => {
+  sizeIdx = (sizeIdx + 1) % sizes.length;
+  document.getElementById('btnSize').textContent = "크기: " + sizes[sizeIdx].label;
+  scene.remove(dog);
+  dog = buildDog(sizes[sizeIdx].scale);
+  scene.add(dog);
+};
+
+// ---- 애니메이션 루프 ----
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+
+  // 방향키 이동
+  let moveX = 0, moveZ = 0;
+  if (keys['ArrowUp']) moveZ -= 1;
+  if (keys['ArrowDown']) moveZ += 1;
+  if (keys['ArrowLeft']) moveX -= 1;
+  if (keys['ArrowRight']) moveX += 1;
+
+  const isMoving = walking && (moveX !== 0 || moveZ !== 0) || (walking && moveX===0 && moveZ===0 ? autoWalk() : false);
+
+  if (moveX !== 0 || moveZ !== 0) {
+    heading = Math.atan2(moveX, moveZ);
+    dog.rotation.y = heading;
+    dog.position.x += Math.sin(heading) * dt * 1.2;
+    dog.position.z += Math.cos(heading) * dt * 1.2;
+    dog.position.x = THREE.MathUtils.clamp(dog.position.x, -2.7, 2.7);
+    dog.position.z = THREE.MathUtils.clamp(dog.position.z, -2.7, 2.7);
+  }
+
+  if (walking) {
+    walkTime += dt * 6;
+    const legs = dog.userData.legs;
+    if (legs) {
+      legs[0].rotation.x = Math.sin(walkTime) * 0.5;
+      legs[3].rotation.x = Math.sin(walkTime) * 0.5;
+      legs[1].rotation.x = Math.sin(walkTime + Math.PI) * 0.5;
+      legs[2].rotation.x = Math.sin(walkTime + Math.PI) * 0.5;
+    }
+    if (dog.userData.tail) {
+      dog.userData.tail.rotation.y = Math.sin(walkTime * 1.5) * 0.3;
+    }
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+function autoWalk(){ return false; }
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
